@@ -293,7 +293,7 @@ export function buildDiscordApiContext(messages: readonly APIMessage[], options?
 		...(options?.baseContext?.channels ?? {})
 	};
 	const roles = { ...(options?.baseContext?.roles ?? {}) };
-	const members = { ...(options?.baseContext?.members ?? {}) };
+	const members: NonNullable<DiscordContext["members"]> = { ...(options?.baseContext?.members ?? {}) };
 	const guild = options?.baseContext?.guild;
 	const transcriptChannelId = options?.baseContext?.channel_id ?? messages.find((message) => message.channel_id)?.channel_id;
 
@@ -332,7 +332,8 @@ export function buildDiscordApiContext(messages: readonly APIMessage[], options?
 			users[message.interaction.user.id] = users[message.interaction.user.id] ?? message.interaction.user;
 		}
 
-		for (const voters of Object.values(message.poll?.answer_voters ?? {})) {
+		const answerVoters = message.poll?.answer_voters;
+		for (const voters of Object.values(answerVoters ?? {})) {
 			for (const voter of voters) {
 				users[voter.id] = users[voter.id] ?? voter;
 			}

@@ -170,7 +170,7 @@ describe("@ticketpm/discord-api", () => {
 			}
 		});
 
-		expect(transcript.messages.map((message) => message.id)).toEqual(["m1", "m2"]);
+		expect(transcript.messages.map((message: { id: string }) => message.id)).toEqual(["m1", "m2"]);
 	});
 
 	it("adds the current channel to context when fetched through the enricher", async () => {
