@@ -20,3 +20,14 @@ bun install
 bun run build
 bun --bun vitest run
 ```
+
+## Publishing
+
+This repository is set up for lockstep releases: all packages must share the same version, and releases are published from GitHub Actions only.
+
+1. Bump the version in each package manifest to the same semver.
+2. Merge the release commit to `main`.
+3. Create and push a matching Git tag like `v0.0.2`.
+4. Approve the `release` GitHub environment when the workflow asks for it.
+
+The release workflow rebuilds the repo, prepares registry-specific publish bundles, dry-runs JSR validation, then publishes to JSR and npm with OIDC.
