@@ -16,7 +16,7 @@ import { joinUrl } from "./utils.js";
 
 export interface TicketPmUploadClientOptions {
 	/**
-	 * Base transcript API URL, for example `https://ticket.pm/v2`.
+	 * Base transcript API URL, for example `https://api.ticket.pm/v2`.
 	 */
 	baseUrl: string;
 	/**

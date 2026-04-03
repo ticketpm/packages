@@ -802,7 +802,7 @@ describe("@ticketpm/core", () => {
 	it("rejects compressed uploads that exceed the configured size limit", async () => {
 		const fetchMock = vi.fn<typeof fetch>();
 		const client = new TicketPmUploadClient({
-			baseUrl: "https://ticket.pm/v2",
+			baseUrl: "https://api.ticket.pm/v2",
 			fetch: fetchMock
 		});
 
@@ -822,7 +822,7 @@ describe("@ticketpm/core", () => {
 			})
 		);
 		const client = new TicketPmUploadClient({
-			baseUrl: "https://ticket.pm/v2",
+			baseUrl: "https://api.ticket.pm/v2",
 			fetch: fetchMock
 		});
 
@@ -835,7 +835,7 @@ describe("@ticketpm/core", () => {
 	it("supports uploads without uuid-style ids and returns rate limit headers", async () => {
 		const fetchCalls: Array<{ url: string; headers?: HeadersInit }> = [];
 		const client = new TicketPmUploadClient({
-			baseUrl: "https://ticket.pm/v2",
+			baseUrl: "https://api.ticket.pm/v2",
 			token: "Bearer already-normalized",
 			fetch: (async (input: URL | RequestInfo, init?: RequestInit | BunFetchRequestInit) => {
 				fetchCalls.push({
@@ -859,7 +859,7 @@ describe("@ticketpm/core", () => {
 		});
 
 		expect(fetchCalls).toHaveLength(1);
-		expect(fetchCalls[0]?.url).toBe("https://ticket.pm/v2/upload");
+		expect(fetchCalls[0]?.url).toBe("https://api.ticket.pm/v2/upload");
 		expect(new Headers(fetchCalls[0]?.headers).get("Authorization")).toBe("Bearer already-normalized");
 		expect(result).toEqual({
 			id: "transcript-id",
@@ -870,7 +870,7 @@ describe("@ticketpm/core", () => {
 
 	it("ignores malformed or missing rate limit headers", async () => {
 		const client = new TicketPmUploadClient({
-			baseUrl: "https://ticket.pm/v2",
+			baseUrl: "https://api.ticket.pm/v2",
 			fetch: (async () =>
 				new Response(JSON.stringify({ id: "transcript-id" }), {
 					status: 200,
@@ -890,14 +890,14 @@ describe("@ticketpm/core", () => {
 
 	it("surfaces upload API errors and missing transcript ids", async () => {
 		const failingClient = new TicketPmUploadClient({
-			baseUrl: "https://ticket.pm/v2",
+			baseUrl: "https://api.ticket.pm/v2",
 			fetch: (async () =>
 				new Response("upload failed", {
 					status: 500
 				})) as unknown as typeof fetch
 		});
 		const missingIdClient = new TicketPmUploadClient({
-			baseUrl: "https://ticket.pm/v2",
+			baseUrl: "https://api.ticket.pm/v2",
 			fetch: (async () =>
 				new Response(JSON.stringify({}), {
 					status: 200,
@@ -915,7 +915,7 @@ describe("@ticketpm/core", () => {
 
 	it("propagates hard network failures from transcript uploads", async () => {
 		const client = new TicketPmUploadClient({
-			baseUrl: "https://ticket.pm/v2",
+			baseUrl: "https://api.ticket.pm/v2",
 			fetch: (async () => {
 				throw new TypeError("fetch failed");
 			}) as unknown as typeof fetch
@@ -961,7 +961,7 @@ describe("@ticketpm/core", () => {
 			]
 		};
 		const uploadClient = new TicketPmUploadClient({
-			baseUrl: "https://ticket.pm/v2",
+			baseUrl: "https://api.ticket.pm/v2",
 			token: "secret-token",
 			fetch: (async (input: URL | RequestInfo, init?: RequestInit | BunFetchRequestInit) => {
 				fetchCalls.push({
@@ -998,7 +998,7 @@ describe("@ticketpm/core", () => {
 		});
 
 		const result = await uploadClient.uploadDraftTranscript(draftTranscript);
-		const uploadRequest = fetchCalls.find((call) => call.url === "https://ticket.pm/v2/upload?uuid=uuid");
+		const uploadRequest = fetchCalls.find((call) => call.url === "https://api.ticket.pm/v2/upload?uuid=uuid");
 		const uploadedTranscript = await decodeCompressedUploadBody(uploadRequest?.body);
 		const avatarRequest = fetchCalls.find((call) => call.url === "https://m.ticket.pm/v2/avatars/upload");
 		const attachmentRequest = fetchCalls.find((call) => call.url === "https://m.ticket.pm/v2/attachments/upload");
@@ -1039,7 +1039,7 @@ describe("@ticketpm/core", () => {
 			]
 		};
 		const uploadClient = new TicketPmUploadClient({
-			baseUrl: "https://ticket.pm/v2",
+			baseUrl: "https://api.ticket.pm/v2",
 			token: "secret-token",
 			fetch: (async (input: URL | RequestInfo, init?: RequestInit | BunFetchRequestInit) => {
 				fetchCalls.push({
@@ -1060,7 +1060,7 @@ describe("@ticketpm/core", () => {
 			mediaProxy: false
 		});
 
-		const uploadRequest = fetchCalls.find((call) => call.url === "https://ticket.pm/v2/upload?uuid=uuid");
+		const uploadRequest = fetchCalls.find((call) => call.url === "https://api.ticket.pm/v2/upload?uuid=uuid");
 		const uploadedTranscript = await decodeCompressedUploadBody(uploadRequest?.body);
 
 		expect(fetchCalls).toHaveLength(1);
@@ -1112,7 +1112,7 @@ describe("@ticketpm/core", () => {
 			}) as typeof fetch
 		});
 		const uploadClient = new TicketPmUploadClient({
-			baseUrl: "https://ticket.pm/v2",
+			baseUrl: "https://api.ticket.pm/v2",
 			token: "uploader-token",
 			fetch: (async (input: URL | RequestInfo, init?: RequestInit | BunFetchRequestInit) => {
 				fetchCalls.push({
@@ -1135,7 +1135,7 @@ describe("@ticketpm/core", () => {
 		});
 
 		const proxyRequest = fetchCalls.find((call) => call.url === "https://media.example.com/v2/attachments/upload");
-		const uploadRequest = fetchCalls.find((call) => call.url === "https://ticket.pm/v2/upload?uuid=uuid");
+		const uploadRequest = fetchCalls.find((call) => call.url === "https://api.ticket.pm/v2/upload?uuid=uuid");
 		const uploadedTranscript = await decodeCompressedUploadBody(uploadRequest?.body);
 
 		expect(proxyRequest).toBeDefined();
@@ -1171,7 +1171,7 @@ describe("@ticketpm/core", () => {
 			]
 		};
 		const uploadClient = new TicketPmUploadClient({
-			baseUrl: "https://ticket.pm/v2",
+			baseUrl: "https://api.ticket.pm/v2",
 			token: "secret-token",
 			fetch: (async (input: URL | RequestInfo, init?: RequestInit | BunFetchRequestInit) => {
 				fetchCalls.push({
@@ -1199,7 +1199,7 @@ describe("@ticketpm/core", () => {
 
 		await uploadClient.uploadDraftTranscript(draftTranscript);
 
-		const uploadRequest = fetchCalls.find((call) => call.url === "https://ticket.pm/v2/upload?uuid=uuid");
+		const uploadRequest = fetchCalls.find((call) => call.url === "https://api.ticket.pm/v2/upload?uuid=uuid");
 		const uploadedTranscript = await decodeCompressedUploadBody(uploadRequest?.body);
 
 		expect(draftTranscript.messages[0]?.attachments?.[0]?.proxy_url).toBeUndefined();

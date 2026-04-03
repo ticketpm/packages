@@ -70,7 +70,7 @@ const draftTranscript: TranscriptBuildInput = {
 };
 
 const uploadClient = new TicketPmUploadClient({
-  baseUrl: "https://ticket.pm/v2",
+  baseUrl: "https://api.ticket.pm/v2",
   token: process.env.TICKETPM_TOKEN
 });
 
@@ -133,7 +133,7 @@ const draftTranscript: TranscriptBuildInput = {
 };
 
 const uploadClient = new TicketPmUploadClient({
-  baseUrl: "https://ticket.pm/v2",
+  baseUrl: "https://api.ticket.pm/v2",
   token: process.env.TICKETPM_TOKEN
 });
 
@@ -184,7 +184,7 @@ const draftTranscript: TranscriptBuildInput = {
 };
 
 const uploadClient = new TicketPmUploadClient({
-  baseUrl: "https://ticket.pm/v2",
+  baseUrl: "https://api.ticket.pm/v2",
   token: process.env.TICKETPM_TOKEN
 });
 
@@ -310,7 +310,7 @@ Behavior notes:
 
 `TicketPmUploadClient` accepts:
 
-- `baseUrl`: transcript API root such as `https://ticket.pm/v2`
+- `baseUrl`: transcript API root such as `https://api.ticket.pm/v2`
 - `token`: optional bearer token or raw token string
 - `fetch`: optional custom fetch implementation
 - `defaultMediaProxyBaseUrl`: optional override for the auto-created media proxy client used by `uploadDraftTranscript()`
@@ -319,7 +319,7 @@ Example:
 
 ```ts
 const uploadClient = new TicketPmUploadClient({
-  baseUrl: "https://ticket.pm/v2",
+  baseUrl: "https://api.ticket.pm/v2",
   token: process.env.TICKETPM_TOKEN,
   fetch: customFetch,
   defaultMediaProxyBaseUrl: "https://m.ticket.pm/v2"
@@ -341,7 +341,7 @@ Example:
 const token = process.env.TICKETPM_TOKEN;
 
 const uploadClient = new TicketPmUploadClient({
-  baseUrl: "https://ticket.pm/v2",
+  baseUrl: "https://api.ticket.pm/v2",
   token
 });
 
