@@ -14,6 +14,7 @@ import {
 	type RoleInfo,
 	type StoredTranscript,
 	sortMessagesChronologically,
+	type TranscriptBuildInput,
 	type UserInfo
 } from "@ticketpm/core";
 import type { Collection, Guild, GuildMember, Message, MessageReaction, Role, User } from "discord.js";
@@ -326,18 +327,26 @@ export function buildDiscordJsContext(messages: readonly Message<boolean>[], opt
 }
 
 /**
- * Normalize, sort, compact, and finalize a transcript from discord.js objects.
+ * Normalize and sort discord.js objects into the draft transcript shape used by
+ * `TicketPmUploadClient.uploadDraftTranscript()`.
  */
-export function createDiscordJsTranscript(options: CreateDiscordJsTranscriptOptions): StoredTranscript {
+export function createDiscordJsDraftTranscript(options: CreateDiscordJsTranscriptOptions): TranscriptBuildInput {
 	const normalizedMessages = sortMessagesChronologically(
 		options.messages.map((message) => discordJsMessageToDraftMessage(message))
 	);
 	const context = buildDiscordJsContext(options.messages, options);
 
-	return buildStoredTranscript({
+	return {
 		messages: normalizedMessages,
 		context
-	});
+	};
+}
+
+/**
+ * Normalize, sort, compact, and finalize a transcript from discord.js objects.
+ */
+export function createDiscordJsTranscript(options: CreateDiscordJsTranscriptOptions): StoredTranscript {
+	return buildStoredTranscript(createDiscordJsDraftTranscript(options));
 }
 
 /**

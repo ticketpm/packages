@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 
 import {
 	buildDiscordJsContext,
+	createDiscordJsDraftTranscript,
 	createDiscordJsTranscript,
 	discordJsMessageToDraftMessage,
+	discordJsUserToUserInfo,
 	fetchMessagesUpToLimit
 } from "../src/index.js";
 
@@ -22,6 +24,7 @@ function createMockMessage(): Message<boolean> {
 			id: "u1",
 			bot: false,
 			username: "alice",
+			avatar: "avatar-hash",
 			avatarURL: () => null
 		},
 		mentions: {
@@ -46,6 +49,18 @@ describe("@ticketpm/discordjs", () => {
 		expect(message.author?.id).toBe("u1");
 		expect(message.channel_id).toBe("c1");
 		expect(message.content).toBe("hello");
+	});
+
+	it("keeps the raw avatar hash instead of serializing a CDN URL", () => {
+		const user = discordJsUserToUserInfo({
+			id: "u1",
+			bot: false,
+			username: "alice",
+			avatar: "a_avatarhash",
+			avatarURL: () => "https://cdn.discordapp.com/avatars/u1/a_avatarhash.gif"
+		} as never);
+
+		expect(user.avatar).toBe("a_avatarhash");
 	});
 
 	it("builds transcript context from message and channel data", () => {
@@ -78,6 +93,27 @@ describe("@ticketpm/discordjs", () => {
 			author_id: "u1"
 		});
 		expect(transcript.context?.channels?.c1?.name).toBe("support");
+	});
+
+	it("creates a draft transcript for media-proxied uploads", () => {
+		const transcript = createDiscordJsDraftTranscript({
+			messages: [createMockMessage()],
+			channel: {
+				id: "c1",
+				name: "support",
+				type: 0
+			}
+		});
+
+		expect(transcript.messages[0]).toMatchObject({
+			id: "m1",
+			channel_id: "c1",
+			author: {
+				id: "u1",
+				avatar: "avatar-hash"
+			}
+		});
+		expect(transcript.context.channels?.c1?.name).toBe("support");
 	});
 
 	it("sorts discord.js messages chronologically before compact export", () => {

@@ -6,6 +6,7 @@ Adapters for converting `discord.js` objects into `ticket.pm` transcript payload
 
 - Conversion from `Message`, `User`, `GuildMember`, `Role`, and channel-like objects into `@ticketpm/core` data structures.
 - Context builders for transcripts assembled from already-fetched discord.js objects.
+- Draft transcript creation for media-proxied uploads through `@ticketpm/core`.
 - A pagination helper for walking backwards through channel history before export.
 - One-shot helpers that normalize, sort, compact, and finalize transcripts.
 
@@ -100,6 +101,7 @@ const transcript = createDiscordJsTranscript({
 ### Context and transcript creation
 
 - `buildDiscordJsContext(messages, options)` builds transcript context from already-fetched discord.js objects.
+- `createDiscordJsDraftTranscript(options)` normalizes messages, sorts them oldest-first, and returns the draft transcript shape expected by `TicketPmUploadClient.uploadDraftTranscript()`.
 - `createDiscordJsTranscript(options)` normalizes messages, sorts them oldest-first, builds context, and compacts the final transcript.
 
 ### Message collection
@@ -109,6 +111,7 @@ const transcript = createDiscordJsTranscript({
 ## Behavior notes
 
 - `createDiscordJsTranscript()` always sorts messages chronologically before compact export.
+- `createDiscordJsDraftTranscript()` is the right helper when you want `@ticketpm/core` to proxy avatars, attachments, embed media, and guild icons through `https://m.ticket.pm/v2` during upload.
 - `fetchMessagesUpToLimit()` returns the messages in the order they were fetched from Discord history, which is typically newest-first. The transcript helper reorders them for final export.
 - `buildDiscordJsContext()` keeps pre-seeded `baseContext` entries and fills only missing users, channels, roles, members, or guild metadata.
 - Member role lists are filtered so only roles that actually exist in the transcript context remain attached to members.
@@ -132,11 +135,11 @@ This package prepares transcript data. Uploading is still handled by `@ticketpm/
 
 ```ts
 import { TicketPmUploadClient } from "@ticketpm/core";
-import { createDiscordJsTranscript, fetchMessagesUpToLimit } from "@ticketpm/discordjs";
+import { createDiscordJsDraftTranscript, fetchMessagesUpToLimit } from "@ticketpm/discordjs";
 
 const messages = await fetchMessagesUpToLimit(channel, 1000);
 
-const transcript = createDiscordJsTranscript({
+const draftTranscript = createDiscordJsDraftTranscript({
   messages,
   channel: {
     id: channel.id,
@@ -152,6 +155,15 @@ const uploadClient = new TicketPmUploadClient({
   token: process.env.TICKETPM_TOKEN
 });
 
-const result = await uploadClient.uploadTranscript(transcript);
+const result = await uploadClient.uploadDraftTranscript(draftTranscript);
 console.log(result.id);
 ```
+
+`uploadDraftTranscript()` is the important part here. It auto-proxies supported
+assets to `https://m.ticket.pm/v2` by default before the final transcript is
+compacted and uploaded, including:
+
+- user avatar hashes
+- guild icon hashes
+- attachments
+- embed image, thumbnail, video, author icon, and footer icon URLs
