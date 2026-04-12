@@ -80,6 +80,7 @@ export function discordJsUserToUserInfo(user: User, options?: { isWebhook?: bool
 	);
 
 	const rawUser = user as User & {
+		avatar?: string | null;
 		discriminator?: string;
 		globalName?: string | null;
 	};
@@ -97,7 +98,7 @@ export function discordJsUserToUserInfo(user: User, options?: { isWebhook?: bool
 		),
 		display_name: !rawUser.globalName && (user.bot || webhook) ? user.username : undefined,
 		global_name: rawUser.globalName ?? null,
-		avatar: user.avatarURL() ?? null,
+		avatar: rawUser.avatar ?? null,
 		bot: user.bot,
 		webhook: webhook || undefined
 	};
