@@ -288,13 +288,13 @@ export function buildDiscordJsContext(messages: readonly Message<boolean>[], opt
 	}
 
 	for (const member of options?.members ?? options?.guild?.members.cache.values() ?? []) {
+		if (!users[member.user.id]) {
+			continue;
+		}
+
 		const roleIds = [...member.roles.cache.keys()].filter((roleId) => roles[roleId]);
 		if (roleIds.length > 0) {
 			members[member.id] = { roles: roleIds };
-		}
-
-		if (!users[member.user.id]) {
-			users[member.user.id] = discordJsUserToUserInfo(member.user);
 		}
 	}
 

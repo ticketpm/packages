@@ -51,7 +51,7 @@ const transcript = createDiscordJsTranscript({
 
 ## Build from already-fetched objects
 
-If you already have the messages, roles, members, and channel metadata you want, you can pass them directly and skip extra Discord fetches in your own code.
+If you already have the messages, roles, members, and channel metadata you want, you can pass them directly and skip extra Discord fetches in your own code. Member data is used only to attach role metadata to transcript participants.
 
 ```ts
 import { buildDiscordJsContext, createDiscordJsTranscript } from "@ticketpm/discordjs";
@@ -113,9 +113,9 @@ const transcript = createDiscordJsTranscript({
 - `createDiscordJsTranscript()` always sorts messages chronologically before compact export.
 - `createDiscordJsDraftTranscript()` is the right helper when you want `@ticketpm/core` to proxy avatars, attachments, embed media, and guild icons through `https://m.ticket.pm/v2` during upload.
 - `fetchMessagesUpToLimit()` returns the messages in the order they were fetched from Discord history, which is typically newest-first. The transcript helper reorders them for final export.
-- `buildDiscordJsContext()` keeps pre-seeded `baseContext` entries and fills only missing users, channels, roles, members, or guild metadata.
-- Member role lists are filtered so only roles that actually exist in the transcript context remain attached to members.
-- Passing `guild` adds guild metadata such as `name`, `icon`, `icon_url`, `approximate_member_count`, `owner_id`, and `vanity_url_code`.
+- `buildDiscordJsContext()` keeps pre-seeded `baseContext` entries and fills missing users from transcript messages, mentions, and references.
+- Member role lists are attached only for users already present in the transcript context, and only for roles that exist in the context.
+- Passing `guild` adds guild metadata such as `name`, `icon`, `icon_url`, `approximate_member_count`, `owner_id`, and `vanity_url_code`, and can provide cached member roles for transcript participants.
 - Passing `channel` and `parentChannel` lets the transcript preserve thread and parent-channel relationships.
 - Message references, attachments, embeds, reactions, components, stickers, and polls are all normalized from the discord.js message object when present.
 - Webhook-backed messages are normalized with webhook-aware author formatting to stay consistent with the main exporter.

@@ -178,7 +178,13 @@ describe("@ticketpm/discordjs", () => {
 			color: 0xff0000,
 			position: 1
 		};
-		const memberUser = {
+		const participantUser = {
+			id: "u1",
+			bot: false,
+			username: "alice",
+			avatarURL: () => null
+		};
+		const unrelatedUser = {
 			id: "u2",
 			bot: false,
 			username: "bob",
@@ -193,8 +199,8 @@ describe("@ticketpm/discordjs", () => {
 			roles: [role] as never,
 			members: [
 				{
-					id: "u2",
-					user: memberUser,
+					id: "u1",
+					user: participantUser,
 					roles: {
 						cache: new Map([
 							["r1", role],
@@ -208,6 +214,13 @@ describe("@ticketpm/discordjs", () => {
 								}
 							]
 						])
+					}
+				},
+				{
+					id: "u2",
+					user: unrelatedUser,
+					roles: {
+						cache: new Map([["r1", role]])
 					}
 				}
 			] as never,
@@ -233,10 +246,11 @@ describe("@ticketpm/discordjs", () => {
 			color: "#ff0000",
 			position: 1
 		});
-		expect(context.members?.u2).toEqual({
+		expect(context.members?.u1).toEqual({
 			roles: ["r1"]
 		});
-		expect(context.users?.u2?.username).toBe("bob");
+		expect(context.members?.u2).toBeUndefined();
+		expect(context.users?.u2).toBeUndefined();
 		expect(context.guild).toEqual({
 			id: "g1",
 			name: "Guild",
@@ -246,6 +260,65 @@ describe("@ticketpm/discordjs", () => {
 			owner_id: "u1",
 			vanity_url_code: "support"
 		});
+	});
+
+	it("uses cached guild members for transcript participant role metadata", () => {
+		const role = {
+			id: "r1",
+			name: "Support",
+			color: 0x00ff00,
+			position: 2
+		};
+		const unrelatedUser = {
+			id: "u2",
+			bot: false,
+			username: "bob",
+			avatarURL: () => null
+		};
+		const context = buildDiscordJsContext([createMockMessage()], {
+			guild: {
+				id: "g1",
+				name: "Guild",
+				icon: null,
+				iconURL: () => null,
+				memberCount: 42,
+				ownerId: "u1",
+				vanityURLCode: null,
+				roles: {
+					cache: new Map([["r1", role]])
+				},
+				members: {
+					cache: new Map([
+						[
+							"u1",
+							{
+								id: "u1",
+								user: createMockMessage().author,
+								roles: {
+									cache: new Map([["r1", role]])
+								}
+							}
+						],
+						[
+							"u2",
+							{
+								id: "u2",
+								user: unrelatedUser,
+								roles: {
+									cache: new Map([["r1", role]])
+								}
+							}
+						]
+					])
+				}
+			} as never
+		});
+
+		expect(context.members?.u1).toEqual({
+			roles: ["r1"]
+		});
+		expect(context.members?.u2).toBeUndefined();
+		expect(context.users?.u2).toBeUndefined();
 	});
 
 	it("stops pagination when a fetch returns a partial page before the limit", async () => {
