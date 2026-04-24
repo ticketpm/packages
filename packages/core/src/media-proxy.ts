@@ -28,6 +28,11 @@ export interface TicketPmMediaProxyClientOptions {
 
 export type UploadProgressCallback = (completed: number, total: number) => void;
 
+type AvatarUpload = {
+	hash: string;
+	userId: string;
+};
+
 function buildUploadHeaders(options: UploadHeadersOptions): HeadersInit {
 	const headers = new Headers({ "Content-Type": options.contentType });
 	if (options.token) {
@@ -282,22 +287,78 @@ export function collectTranscriptMediaUrls(messages: readonly DraftMessage[]): S
 export async function proxyTranscriptAvatarsInPlace(
 	users: Record<string, UserInfo>,
 	client: TicketPmMediaProxyClient,
-	options?: { onProgress?: UploadProgressCallback }
+	options?: { onProgress?: UploadProgressCallback; userIds?: ReadonlySet<string> }
 ): Promise<void> {
-	const uploads = Object.values(users)
-		.filter((user) => isValidAvatarHash(user.avatar))
-		.map((user) => ({ hash: user.avatar!.trim(), userId: user.id }));
+	const uploads = new Map<string, AvatarUpload>();
 
-	const total = uploads.length;
+	for (const user of Object.values(users)) {
+		if (options?.userIds && !options.userIds.has(user.id)) {
+			continue;
+		}
+
+		if (!isValidAvatarHash(user.avatar)) {
+			continue;
+		}
+
+		const hash = user.avatar.trim();
+		if (!uploads.has(hash)) {
+			uploads.set(hash, { hash, userId: user.id });
+		}
+	}
+
+	const total = uploads.size;
 	let completed = 0;
 	options?.onProgress?.(completed, total);
 
-	for (const upload of uploads) {
+	for (const upload of uploads.values()) {
 		await client.uploadAvatarHash(upload.hash, upload.userId);
 
 		completed += 1;
 		options?.onProgress?.(completed, total);
 	}
+}
+
+function collectInteractionMetadataUserIds(metadata: DraftMessage["interaction_metadata"], userIds: Set<string>): void {
+	if (!metadata) {
+		return;
+	}
+
+	userIds.add(metadata.user.id);
+	collectInteractionMetadataUserIds(metadata.triggering_interaction_metadata, userIds);
+}
+
+function collectMessageUserIds(message: DraftMessage, userIds: Set<string>): void {
+	if (message.author) {
+		userIds.add(message.author.id);
+	}
+
+	for (const mention of message.mentions ?? []) {
+		userIds.add(mention.id);
+	}
+
+	if (message.interaction) {
+		userIds.add(message.interaction.user.id);
+	}
+
+	collectInteractionMetadataUserIds(message.interaction_metadata, userIds);
+
+	for (const voters of Object.values(message.poll?.answer_voters ?? {})) {
+		for (const voter of voters) {
+			userIds.add(voter.id);
+		}
+	}
+
+	if (message.referenced_message) {
+		collectMessageUserIds(message.referenced_message, userIds);
+	}
+}
+
+function collectTranscriptUserIds(messages: readonly DraftMessage[]): Set<string> {
+	const userIds = new Set<string>();
+	for (const message of messages) {
+		collectMessageUserIds(message, userIds);
+	}
+	return userIds;
 }
 
 /**
@@ -407,7 +468,8 @@ export async function proxyTranscriptAssetsInPlace(
 ): Promise<void> {
 	if (transcript.context.users) {
 		await proxyTranscriptAvatarsInPlace(transcript.context.users, client, {
-			onProgress: options?.avatarProgress
+			onProgress: options?.avatarProgress,
+			userIds: collectTranscriptUserIds(transcript.messages)
 		});
 	}
 

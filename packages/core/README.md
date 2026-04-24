@@ -275,6 +275,8 @@ If the media proxy is down, the package falls back by not replacing the transcri
 `proxyTranscriptAvatarsInPlace()` uploads avatar hashes only as a cache/warm-up side effect.
 
 - `user.avatar` is never replaced with a proxy URL.
+- Draft transcript uploads only warm avatars for users referenced by draft messages.
+- Duplicate avatar hashes are uploaded once and counted once in progress.
 - If avatar upload fails, the transcript is unchanged.
 - This is required because the current viewer still expects `user.avatar` to be the original Discord avatar hash.
 

@@ -505,6 +505,10 @@ describe("@ticketpm/core", () => {
 			messages: [
 				{
 					id: "m1",
+					author: {
+						id: "u1",
+						username: "alice"
+					},
 					content: "hello",
 					attachments: [
 						{
@@ -526,7 +530,54 @@ describe("@ticketpm/core", () => {
 		expect(fetchCalls).toContain("https://m.ticket.pm/v2/attachments/upload");
 	});
 
-	it("deduplicates avatar uploads while still reporting progress for each valid user", async () => {
+	it("only proxies avatars for users referenced by draft messages", async () => {
+		const fetchBodies: string[] = [];
+		const progressUpdates: Array<[number, number]> = [];
+		const client = new TicketPmMediaProxyClient({
+			baseUrl: "https://m.ticket.pm/v2",
+			fetch: (async (_input: URL | RequestInfo, init?: RequestInit | BunFetchRequestInit) => {
+				fetchBodies.push(String(init?.body ?? ""));
+
+				return new Response(JSON.stringify({ hash: "cached-avatar" }), {
+					status: 200,
+					headers: {
+						"Content-Type": "application/json"
+					}
+				});
+			}) as typeof fetch
+		});
+		const transcript: { context: DiscordContext; messages: DraftMessage[] } = {
+			context: {
+				users: {
+					u1: { id: "u1", username: "alice", avatar: "hash1" },
+					u2: { id: "u2", username: "bob", avatar: "hash2" },
+					u3: { id: "u3", username: "carol", avatar: "hash3" }
+				}
+			},
+			messages: [
+				{
+					id: "m1",
+					author: { id: "u1", username: "alice" },
+					mentions: [{ id: "u2", username: "bob" }]
+				}
+			]
+		};
+
+		await proxyTranscriptAssetsInPlace(transcript, client, {
+			avatarProgress: (completed, total) => {
+				progressUpdates.push([completed, total]);
+			}
+		});
+
+		expect(fetchBodies).toEqual([JSON.stringify({ hash: "hash1", id: "u1" }), JSON.stringify({ hash: "hash2", id: "u2" })]);
+		expect(progressUpdates).toEqual([
+			[0, 2],
+			[1, 2],
+			[2, 2]
+		]);
+	});
+
+	it("deduplicates avatar uploads while reporting progress for each unique valid hash", async () => {
 		const fetchCalls: Array<{ url: string; body: string }> = [];
 		const progressUpdates: Array<[number, number]> = [];
 		const client = new TicketPmMediaProxyClient({
@@ -564,9 +615,8 @@ describe("@ticketpm/core", () => {
 			}
 		]);
 		expect(progressUpdates).toEqual([
-			[0, 2],
-			[1, 2],
-			[2, 2]
+			[0, 1],
+			[1, 1]
 		]);
 	});
 
