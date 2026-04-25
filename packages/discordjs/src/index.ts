@@ -47,6 +47,10 @@ type DiscordJsPollLike = {
 	layoutType?: number;
 };
 
+type MessageWithReferencedMessage = Message<boolean> & {
+	referencedMessage?: Message<boolean> | null;
+};
+
 function channelTypeFromDiscord(type: number): ChannelInfo["type"] {
 	switch (type) {
 		case 0:
@@ -206,15 +210,24 @@ function replyReference(message: Message<boolean>): DraftMessage["message_refere
 	};
 }
 
-/**
- * Convert a discord.js message into the core draft message format.
- */
-export function discordJsMessageToDraftMessage(message: Message<boolean>): DraftMessage {
-	const referencedMessage = (
-		message as Message<boolean> & {
-			referencedMessage?: Message<boolean> | null;
-		}
-	).referencedMessage;
+function resolveReferencedMessage(message: Message<boolean>): Message<boolean> | undefined {
+	const messageWithReference = message as MessageWithReferencedMessage;
+
+	if (messageWithReference.referencedMessage) {
+		return messageWithReference.referencedMessage;
+	}
+
+	const referencedMessageId = message.reference?.messageId;
+	if (!referencedMessageId) {
+		return undefined;
+	}
+
+	return message.channel?.messages?.cache?.get(referencedMessageId);
+}
+
+function discordJsMessageToDraftMessageInternal(message: Message<boolean>, seenMessageIds: Set<string>): DraftMessage {
+	seenMessageIds.add(message.id);
+	const referencedMessage = resolveReferencedMessage(message);
 
 	return {
 		id: message.id,
@@ -234,11 +247,21 @@ export function discordJsMessageToDraftMessage(message: Message<boolean>): Draft
 		reactions: [...message.reactions.cache.values()].map((reaction) => messageReactionToApiReaction(reaction)),
 		components: message.components.map((component) => component.toJSON()) as DraftMessage["components"],
 		sticker_items: [...message.stickers.values()].map((sticker) => stickerToApiStickerItem(sticker)),
-		referenced_message: referencedMessage ? discordJsMessageToDraftMessage(referencedMessage) : undefined,
+		referenced_message:
+			referencedMessage && !seenMessageIds.has(referencedMessage.id)
+				? discordJsMessageToDraftMessageInternal(referencedMessage, seenMessageIds)
+				: undefined,
 		message_reference: replyReference(message),
 		poll: messageToPoll(message),
 		content: message.content
 	};
+}
+
+/**
+ * Convert a discord.js message into the core draft message format.
+ */
+export function discordJsMessageToDraftMessage(message: Message<boolean>): DraftMessage {
+	return discordJsMessageToDraftMessageInternal(message, new Set());
 }
 
 /**

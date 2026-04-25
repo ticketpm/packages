@@ -43,12 +43,126 @@ function createMockMessage(): Message<boolean> {
 	} as unknown as Message<boolean>;
 }
 
+function setReplyTarget(reply: Message<boolean>, referenced: Message<boolean>, options?: { guildId?: string | null }): void {
+	Object.assign(reply, {
+		reference: {
+			messageId: referenced.id,
+			channelId: referenced.channelId,
+			guildId: options?.guildId ?? "g1",
+			type: 0
+		}
+	});
+}
+
+function setMessageCache(messages: Message<boolean>[]): void {
+	const cache = new Map(messages.map((message) => [message.id, message]));
+	const channel = {
+		messages: {
+			cache
+		}
+	};
+
+	for (const message of messages) {
+		Object.assign(message, { channel });
+	}
+}
+
 describe("@ticketpm/discordjs", () => {
 	it("normalizes a discord.js message into a draft message", () => {
 		const message = discordJsMessageToDraftMessage(createMockMessage());
 		expect(message.author?.id).toBe("u1");
 		expect(message.channel_id).toBe("c1");
 		expect(message.content).toBe("hello");
+	});
+
+	it("uses a cached referenced message for reply draft references", () => {
+		const reply = createMockMessage();
+		const referenced = createMockMessage();
+		Object.assign(reply, {
+			id: "m2",
+			content: "reply"
+		});
+		Object.assign(referenced, {
+			content: "original"
+		});
+		setReplyTarget(reply, referenced);
+		setMessageCache([reply, referenced]);
+
+		const message = discordJsMessageToDraftMessage(reply);
+
+		expect(message.message_reference).toEqual({
+			message_id: "m1",
+			channel_id: "c1",
+			guild_id: "g1",
+			type: 0
+		});
+		expect(message.referenced_message).toMatchObject({
+			id: "m1",
+			content: "original",
+			author: {
+				id: "u1"
+			}
+		});
+	});
+
+	it("keeps reply references when the referenced message is not cached", () => {
+		const reply = createMockMessage();
+		const referenced = createMockMessage();
+		Object.assign(reply, {
+			id: "m2"
+		});
+		setReplyTarget(reply, referenced);
+		Object.assign(reply, {
+			channel: {
+				messages: {
+					cache: new Map()
+				}
+			}
+		});
+
+		const message = discordJsMessageToDraftMessage(reply);
+
+		expect(message.message_reference?.message_id).toBe("m1");
+		expect(message.referenced_message).toBeUndefined();
+	});
+
+	it("keeps backward-compatible referencedMessage objects", () => {
+		const reply = createMockMessage();
+		const referenced = createMockMessage();
+		Object.assign(reply, {
+			id: "m2",
+			referencedMessage: referenced
+		});
+		Object.assign(referenced, {
+			content: "original"
+		});
+
+		const message = discordJsMessageToDraftMessage(reply);
+
+		expect(message.referenced_message).toMatchObject({
+			id: "m1",
+			content: "original"
+		});
+	});
+
+	it("does not recurse forever when reply references are cyclic", () => {
+		const first = createMockMessage();
+		const second = createMockMessage();
+		Object.assign(first, {
+			id: "m1"
+		});
+		Object.assign(second, {
+			id: "m2"
+		});
+		setReplyTarget(first, second);
+		setReplyTarget(second, first);
+		setMessageCache([first, second]);
+
+		const message = discordJsMessageToDraftMessage(first);
+
+		expect(message.referenced_message?.id).toBe("m2");
+		expect(message.referenced_message?.message_reference?.message_id).toBe("m1");
+		expect(message.referenced_message?.referenced_message).toBeUndefined();
 	});
 
 	it("keeps the raw avatar hash instead of serializing a CDN URL", () => {
@@ -76,6 +190,30 @@ describe("@ticketpm/discordjs", () => {
 		expect(context.channel_id).toBe("c1");
 		expect(context.channels?.c1?.name).toBe("support");
 		expect(context.users?.u1?.username).toBe("alice");
+	});
+
+	it("adds cached referenced message authors to transcript context users", () => {
+		const reply = createMockMessage();
+		const referenced = createMockMessage();
+		Object.assign(referenced, {
+			author: {
+				id: "u2",
+				bot: false,
+				username: "bob",
+				avatar: null,
+				avatarURL: () => null
+			}
+		});
+		Object.assign(reply, {
+			id: "m2"
+		});
+		setReplyTarget(reply, referenced);
+		setMessageCache([reply, referenced]);
+
+		const context = buildDiscordJsContext([reply]);
+
+		expect(context.users?.u1?.username).toBe("alice");
+		expect(context.users?.u2?.username).toBe("bob");
 	});
 
 	it("creates a compact transcript from discord.js messages", () => {
