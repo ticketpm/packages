@@ -1,3 +1,4 @@
+import { DEFAULT_AVATAR_HASH_CACHE_LIMIT } from "./constants.js";
 import type { DiscordContext, DraftMessage, GuildInfo, UserInfo } from "./types.js";
 import { isRecord, joinUrl, readTrimmedString } from "./utils.js";
 
@@ -24,13 +25,30 @@ export interface TicketPmMediaProxyClientOptions {
 	 * HTTP transport, instrumentation, retries, or authentication pipeline.
 	 */
 	fetch?: typeof fetch;
+	/**
+	 * In-memory cache of avatar hashes already uploaded through this client.
+	 *
+	 * Defaults to enabled with a limit of 50,000 hashes.
+	 */
+	avatarHashCache?: AvatarHashCacheOptions;
 }
 
 export type UploadProgressCallback = (completed: number, total: number) => void;
+export type AvatarHashCacheOptions =
+	| boolean
+	| {
+			enabled?: boolean;
+			limit?: number;
+	  };
 
 type AvatarUpload = {
 	hash: string;
 	userId: string;
+};
+
+type ResolvedAvatarHashCacheOptions = {
+	enabled: boolean;
+	limit: number;
 };
 
 function buildUploadHeaders(options: UploadHeadersOptions): HeadersInit {
@@ -58,6 +76,18 @@ function buildAnimatedAssetUrl(baseUrl: string, kind: "avatars" | "icons", hash:
 	return url.toString();
 }
 
+function resolveAvatarHashCacheOptions(options: AvatarHashCacheOptions | undefined): ResolvedAvatarHashCacheOptions {
+	if (options === false || (typeof options === "object" && options.enabled === false)) {
+		return { enabled: false, limit: 0 };
+	}
+
+	const limit = typeof options === "object" && options.limit !== undefined ? options.limit : DEFAULT_AVATAR_HASH_CACHE_LIMIT;
+	return {
+		enabled: true,
+		limit: limit > 0 ? Math.trunc(limit) : 0
+	};
+}
+
 function isLikelyMediaObject(record: Record<string, unknown>): boolean {
 	return (
 		readTrimmedString(record, "proxy_url") !== undefined ||
@@ -75,12 +105,15 @@ function isLikelyMediaObject(record: Record<string, unknown>): boolean {
  */
 export class TicketPmMediaProxyClient {
 	private readonly fetchImpl: typeof fetch;
+	private readonly avatarHashCacheOptions: ResolvedAvatarHashCacheOptions;
+	private readonly uploadedAvatarHashes = new Set<string>();
 	private readonly avatarUploadCache = new Map<string, Promise<string | undefined>>();
 	private readonly iconUploadCache = new Map<string, Promise<string | undefined>>();
 	private readonly attachmentUploadCache = new Map<string, Promise<string | undefined>>();
 
 	public constructor(private readonly options: TicketPmMediaProxyClientOptions) {
 		this.fetchImpl = options.fetch ?? fetch;
+		this.avatarHashCacheOptions = resolveAvatarHashCacheOptions(options.avatarHashCache);
 	}
 
 	public get baseUrl(): string {
@@ -100,39 +133,88 @@ export class TicketPmMediaProxyClient {
 		}
 
 		const normalizedHash = hash.trim();
+		if (this.touchUploadedAvatarHash(normalizedHash)) {
+			return buildAnimatedAssetUrl(this.options.baseUrl, "avatars", normalizedHash, normalizedHash.startsWith("a_"));
+		}
+
 		const cached = this.avatarUploadCache.get(normalizedHash);
 		if (cached) {
 			return cached;
 		}
 
-		const request = (async () => {
-			const response = await this.fetchImpl(joinUrl(this.options.baseUrl, "/avatars/upload"), {
-				method: "POST",
-				headers: buildUploadHeaders({
-					contentType: "application/json",
-					token: this.options.token
-				}),
-				body: JSON.stringify({ hash: normalizedHash, id: userId })
-			});
-
-			if (!response.ok) {
-				return undefined;
-			}
-
-			const payload = (await response.json()) as { hash?: unknown };
-			if (typeof payload.hash !== "string" || payload.hash.length === 0) {
-				return undefined;
-			}
-
-			return buildAnimatedAssetUrl(this.options.baseUrl, "avatars", payload.hash, normalizedHash.startsWith("a_"));
-		})();
+		const request = this.uploadAvatarHashUncached(normalizedHash, userId);
+		if (!this.canCacheAvatarHashes()) {
+			return request;
+		}
 
 		this.avatarUploadCache.set(normalizedHash, request);
-		request.catch(() => {
-			this.avatarUploadCache.delete(normalizedHash);
-		});
+		request.then(
+			(proxied) => {
+				this.avatarUploadCache.delete(normalizedHash);
+				if (proxied) {
+					this.rememberUploadedAvatarHash(normalizedHash);
+				}
+			},
+			() => {
+				this.avatarUploadCache.delete(normalizedHash);
+			}
+		);
 
 		return request;
+	}
+
+	private async uploadAvatarHashUncached(hash: string, userId: string): Promise<string | undefined> {
+		const response = await this.fetchImpl(joinUrl(this.options.baseUrl, "/avatars/upload"), {
+			method: "POST",
+			headers: buildUploadHeaders({
+				contentType: "application/json",
+				token: this.options.token
+			}),
+			body: JSON.stringify({ hash, id: userId })
+		});
+
+		if (!response.ok) {
+			return undefined;
+		}
+
+		const payload = (await response.json()) as { hash?: unknown };
+		if (typeof payload.hash !== "string" || payload.hash.length === 0) {
+			return undefined;
+		}
+
+		return buildAnimatedAssetUrl(this.options.baseUrl, "avatars", payload.hash, hash.startsWith("a_"));
+	}
+
+	private canCacheAvatarHashes(): boolean {
+		return this.avatarHashCacheOptions.enabled && this.avatarHashCacheOptions.limit > 0;
+	}
+
+	private touchUploadedAvatarHash(hash: string): boolean {
+		if (!this.canCacheAvatarHashes() || !this.uploadedAvatarHashes.has(hash)) {
+			return false;
+		}
+
+		this.uploadedAvatarHashes.delete(hash);
+		this.uploadedAvatarHashes.add(hash);
+		return true;
+	}
+
+	private rememberUploadedAvatarHash(hash: string): void {
+		if (!this.canCacheAvatarHashes()) {
+			return;
+		}
+
+		if (this.uploadedAvatarHashes.has(hash)) {
+			this.uploadedAvatarHashes.delete(hash);
+		} else if (this.uploadedAvatarHashes.size >= this.avatarHashCacheOptions.limit) {
+			const oldestHash = this.uploadedAvatarHashes.values().next().value;
+			if (oldestHash === undefined) {
+				return;
+			}
+			this.uploadedAvatarHashes.delete(oldestHash);
+		}
+
+		this.uploadedAvatarHashes.add(hash);
 	}
 
 	public async uploadGuildIconHash(hash: string, guildId: string): Promise<string | undefined> {

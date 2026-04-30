@@ -6,6 +6,7 @@ import {
 	MAX_TRANSCRIPT_DECOMPRESSED_BYTES
 } from "./constants.js";
 import {
+	type AvatarHashCacheOptions,
 	proxyTranscriptAssetsInPlace,
 	TicketPmMediaProxyClient,
 	type TicketPmMediaProxyClientOptions,
@@ -36,6 +37,13 @@ export interface TicketPmUploadClientOptions {
 	 * Defaults to `https://m.ticket.pm/v2`.
 	 */
 	defaultMediaProxyBaseUrl?: string;
+	/**
+	 * In-memory cache of avatar hashes already uploaded through the auto-created
+	 * media proxy client.
+	 *
+	 * Defaults to enabled with a limit of 50,000 hashes.
+	 */
+	avatarHashCache?: AvatarHashCacheOptions;
 }
 
 export interface UploadCompressedTranscriptOptions {
@@ -49,7 +57,7 @@ export interface UploadCompressedTranscriptOptions {
 export type UploadDraftTranscriptMediaProxy =
 	| false
 	| TicketPmMediaProxyClient
-	| Partial<Pick<TicketPmMediaProxyClientOptions, "baseUrl" | "token" | "fetch">>;
+	| Partial<Pick<TicketPmMediaProxyClientOptions, "baseUrl" | "token" | "fetch" | "avatarHashCache">>;
 
 export interface UploadDraftTranscriptOptions extends UploadCompressedTranscriptOptions {
 	/**
@@ -99,6 +107,7 @@ function buildUploadHeaders(token?: string): HeadersInit {
  */
 export class TicketPmUploadClient {
 	private readonly fetchImpl: typeof fetch;
+	private autoMediaProxyClient: TicketPmMediaProxyClient | undefined;
 
 	public constructor(private readonly options: TicketPmUploadClientOptions) {
 		this.fetchImpl = options.fetch ?? fetch;
@@ -161,6 +170,7 @@ export class TicketPmUploadClient {
 	 * - `baseUrl`: `options.defaultMediaProxyBaseUrl ?? https://m.ticket.pm/v2`
 	 * - `token`: the uploader token
 	 * - `fetch`: the uploader fetch implementation
+	 * - `avatarHashCache`: the uploader avatar hash cache configuration
 	 *
 	 * Pass `mediaProxy: false` to skip proxying and upload the original media
 	 * fields unchanged.
@@ -192,10 +202,21 @@ export class TicketPmUploadClient {
 			return mediaProxy;
 		}
 
+		if (!mediaProxy) {
+			this.autoMediaProxyClient ??= new TicketPmMediaProxyClient({
+				baseUrl: this.options.defaultMediaProxyBaseUrl ?? DEFAULT_TICKETPM_MEDIA_PROXY_BASE_URL,
+				token: this.options.token,
+				fetch: this.fetchImpl,
+				avatarHashCache: this.options.avatarHashCache
+			});
+			return this.autoMediaProxyClient;
+		}
+
 		return new TicketPmMediaProxyClient({
 			baseUrl: mediaProxy?.baseUrl ?? this.options.defaultMediaProxyBaseUrl ?? DEFAULT_TICKETPM_MEDIA_PROXY_BASE_URL,
 			token: mediaProxy?.token ?? this.options.token,
-			fetch: mediaProxy?.fetch ?? this.fetchImpl
+			fetch: mediaProxy?.fetch ?? this.fetchImpl,
+			avatarHashCache: mediaProxy?.avatarHashCache ?? this.options.avatarHashCache
 		});
 	}
 }

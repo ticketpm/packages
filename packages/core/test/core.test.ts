@@ -620,6 +620,146 @@ describe("@ticketpm/core", () => {
 		]);
 	});
 
+	it("skips avatar uploads for hashes already cached by the media proxy client", async () => {
+		const fetchBodies: string[] = [];
+		const client = new TicketPmMediaProxyClient({
+			baseUrl: "https://m.ticket.pm/v2",
+			fetch: (async (_input: URL | RequestInfo, init?: RequestInit | BunFetchRequestInit) => {
+				fetchBodies.push(String(init?.body ?? ""));
+
+				return new Response(JSON.stringify({ hash: "cached-avatar" }), {
+					status: 200,
+					headers: {
+						"Content-Type": "application/json"
+					}
+				});
+			}) as typeof fetch
+		});
+
+		const firstUpload = await client.uploadAvatarHash("hash1", "u1");
+		const secondUpload = await client.uploadAvatarHash("hash1", "u2");
+
+		expect(firstUpload).toBe("https://m.ticket.pm/v2/avatars/cached-avatar");
+		expect(secondUpload).toBe("https://m.ticket.pm/v2/avatars/hash1");
+		expect(fetchBodies).toEqual([JSON.stringify({ hash: "hash1", id: "u1" })]);
+	});
+
+	it("deduplicates concurrent avatar uploads while the first request is still in flight", async () => {
+		const fetchBodies: string[] = [];
+		let resolveFetch: ((response: Response) => void) | undefined;
+		const fetchResponse = new Promise<Response>((resolve) => {
+			resolveFetch = resolve;
+		});
+		const client = new TicketPmMediaProxyClient({
+			baseUrl: "https://m.ticket.pm/v2",
+			fetch: (async (_input: URL | RequestInfo, init?: RequestInit | BunFetchRequestInit) => {
+				fetchBodies.push(String(init?.body ?? ""));
+				return fetchResponse;
+			}) as typeof fetch
+		});
+
+		const uploads = [
+			client.uploadAvatarHash("hash1", "u1"),
+			client.uploadAvatarHash("hash1", "u2"),
+			client.uploadAvatarHash("hash1", "u3")
+		];
+
+		await Promise.resolve();
+		expect(fetchBodies).toEqual([JSON.stringify({ hash: "hash1", id: "u1" })]);
+
+		resolveFetch?.(
+			new Response(JSON.stringify({ hash: "cached-avatar" }), {
+				status: 200,
+				headers: {
+					"Content-Type": "application/json"
+				}
+			})
+		);
+
+		await expect(Promise.all(uploads)).resolves.toEqual([
+			"https://m.ticket.pm/v2/avatars/cached-avatar",
+			"https://m.ticket.pm/v2/avatars/cached-avatar",
+			"https://m.ticket.pm/v2/avatars/cached-avatar"
+		]);
+	});
+
+	it("can disable the avatar hash cache on the media proxy client", async () => {
+		const fetchBodies: string[] = [];
+		const client = new TicketPmMediaProxyClient({
+			baseUrl: "https://m.ticket.pm/v2",
+			avatarHashCache: false,
+			fetch: (async (_input: URL | RequestInfo, init?: RequestInit | BunFetchRequestInit) => {
+				fetchBodies.push(String(init?.body ?? ""));
+
+				return new Response(JSON.stringify({ hash: "cached-avatar" }), {
+					status: 200,
+					headers: {
+						"Content-Type": "application/json"
+					}
+				});
+			}) as typeof fetch
+		});
+
+		await client.uploadAvatarHash("hash1", "u1");
+		await client.uploadAvatarHash("hash1", "u2");
+
+		expect(fetchBodies).toEqual([JSON.stringify({ hash: "hash1", id: "u1" }), JSON.stringify({ hash: "hash1", id: "u2" })]);
+	});
+
+	it("evicts the least recently used avatar hashes when the cache limit is reached", async () => {
+		const uploadedHashes: string[] = [];
+		const client = new TicketPmMediaProxyClient({
+			baseUrl: "https://m.ticket.pm/v2",
+			avatarHashCache: { limit: 2 },
+			fetch: (async (_input: URL | RequestInfo, init?: RequestInit | BunFetchRequestInit) => {
+				const body = JSON.parse(String(init?.body ?? "{}")) as { hash?: string };
+				uploadedHashes.push(body.hash ?? "");
+
+				return new Response(JSON.stringify({ hash: body.hash }), {
+					status: 200,
+					headers: {
+						"Content-Type": "application/json"
+					}
+				});
+			}) as typeof fetch
+		});
+
+		await client.uploadAvatarHash("hash1", "u1");
+		await client.uploadAvatarHash("hash2", "u2");
+		await client.uploadAvatarHash("hash1", "u1");
+		await client.uploadAvatarHash("hash3", "u3");
+		await client.uploadAvatarHash("hash1", "u1");
+		await client.uploadAvatarHash("hash2", "u2");
+
+		expect(uploadedHashes).toEqual(["hash1", "hash2", "hash3", "hash2"]);
+	});
+
+	it("does not cache avatar hashes after failed proxy responses", async () => {
+		const uploadedHashes: string[] = [];
+		const client = new TicketPmMediaProxyClient({
+			baseUrl: "https://m.ticket.pm/v2",
+			fetch: (async (_input: URL | RequestInfo, init?: RequestInit | BunFetchRequestInit) => {
+				const body = JSON.parse(String(init?.body ?? "{}")) as { hash?: string };
+				uploadedHashes.push(body.hash ?? "");
+
+				return uploadedHashes.length === 1
+					? new Response("proxy unavailable", { status: 503 })
+					: new Response(JSON.stringify({ hash: body.hash }), {
+							status: 200,
+							headers: {
+								"Content-Type": "application/json"
+							}
+						});
+			}) as typeof fetch
+		});
+
+		await client.uploadAvatarHash("hash1", "u1");
+		await client.uploadAvatarHash("hash1", "u1");
+		await client.uploadAvatarHash("hash1", "u1");
+
+		expect(uploadedHashes).toEqual(["hash1", "hash1"]);
+	});
+
 	it("continues avatar proxy uploads after a non-2xx media proxy response", async () => {
 		const fetchCalls: string[] = [];
 		const progressUpdates: Array<[number, number]> = [];
@@ -1061,6 +1201,124 @@ describe("@ticketpm/core", () => {
 		expect(uploadedTranscript.context.users.u1.avatar).toBe("discordhash");
 		expect(uploadedTranscript.messages[0].attachments[0].proxy_url).toBe("https://m.ticket.pm/v2/attachments/attachment-hash");
 		expect(draftTranscript.messages[0]?.attachments?.[0]?.proxy_url).toBeUndefined();
+	});
+
+	it("reuses the auto-created media proxy avatar hash cache across draft uploads", async () => {
+		const fetchCalls: string[] = [];
+		const draftTranscript: TranscriptBuildInput = {
+			context: {
+				channel_id: "c1",
+				channels: {
+					c1: { name: "support" }
+				},
+				users: {
+					u1: {
+						id: "u1",
+						username: "alice",
+						avatar: "discordhash"
+					}
+				}
+			},
+			messages: [
+				{
+					id: "m1",
+					timestamp: "2026-03-18T12:00:00.000Z",
+					author: {
+						id: "u1",
+						username: "alice"
+					},
+					content: "hello"
+				}
+			]
+		};
+		const uploadClient = new TicketPmUploadClient({
+			baseUrl: "https://api.ticket.pm/v2",
+			token: "secret-token",
+			fetch: (async (input: URL | RequestInfo) => {
+				fetchCalls.push(String(input));
+
+				if (String(input) === "https://m.ticket.pm/v2/avatars/upload") {
+					return new Response(JSON.stringify({ hash: "cached-avatar" }), {
+						status: 200,
+						headers: {
+							"Content-Type": "application/json"
+						}
+					});
+				}
+
+				return new Response(JSON.stringify({ id: "transcript-id" }), {
+					status: 200,
+					headers: {
+						"Content-Type": "application/json"
+					}
+				});
+			}) as typeof fetch
+		});
+
+		await uploadClient.uploadDraftTranscript(draftTranscript);
+		await uploadClient.uploadDraftTranscript(draftTranscript);
+
+		expect(fetchCalls.filter((url) => url === "https://m.ticket.pm/v2/avatars/upload")).toHaveLength(1);
+		expect(fetchCalls.filter((url) => url === "https://api.ticket.pm/v2/upload?uuid=uuid")).toHaveLength(2);
+	});
+
+	it("forwards disabled avatar hash cache settings to the auto-created media proxy client", async () => {
+		const fetchCalls: string[] = [];
+		const draftTranscript: TranscriptBuildInput = {
+			context: {
+				channel_id: "c1",
+				channels: {
+					c1: { name: "support" }
+				},
+				users: {
+					u1: {
+						id: "u1",
+						username: "alice",
+						avatar: "discordhash"
+					}
+				}
+			},
+			messages: [
+				{
+					id: "m1",
+					timestamp: "2026-03-18T12:00:00.000Z",
+					author: {
+						id: "u1",
+						username: "alice"
+					},
+					content: "hello"
+				}
+			]
+		};
+		const uploadClient = new TicketPmUploadClient({
+			baseUrl: "https://api.ticket.pm/v2",
+			avatarHashCache: false,
+			fetch: (async (input: URL | RequestInfo) => {
+				fetchCalls.push(String(input));
+
+				if (String(input) === "https://m.ticket.pm/v2/avatars/upload") {
+					return new Response(JSON.stringify({ hash: "cached-avatar" }), {
+						status: 200,
+						headers: {
+							"Content-Type": "application/json"
+						}
+					});
+				}
+
+				return new Response(JSON.stringify({ id: "transcript-id" }), {
+					status: 200,
+					headers: {
+						"Content-Type": "application/json"
+					}
+				});
+			}) as typeof fetch
+		});
+
+		await uploadClient.uploadDraftTranscript(draftTranscript);
+		await uploadClient.uploadDraftTranscript(draftTranscript);
+
+		expect(fetchCalls.filter((url) => url === "https://m.ticket.pm/v2/avatars/upload")).toHaveLength(2);
+		expect(fetchCalls.filter((url) => url === "https://api.ticket.pm/v2/upload?uuid=uuid")).toHaveLength(2);
 	});
 
 	it("allows draft uploads to disable media proxy auto-creation", async () => {

@@ -71,7 +71,8 @@ const draftTranscript: TranscriptBuildInput = {
 
 const uploadClient = new TicketPmUploadClient({
   baseUrl: "https://api.ticket.pm/v2",
-  token: process.env.TICKETPM_TOKEN
+  token: process.env.TICKETPM_TOKEN,
+  avatarHashCache: { limit: 50_000 }
 });
 
 const result = await uploadClient.uploadDraftTranscript(draftTranscript);
@@ -84,6 +85,7 @@ not pass one explicitly. The default auto-created client uses:
 - base URL: `https://m.ticket.pm/v2`
 - token: the same token configured on `TicketPmUploadClient`
 - fetch: the same fetch implementation configured on `TicketPmUploadClient`
+- avatar hash cache: the same cache configuration configured on `TicketPmUploadClient`
 
 ## Quick example with a custom media proxy
 
@@ -277,6 +279,7 @@ If the media proxy is down, the package falls back by not replacing the transcri
 - `user.avatar` is never replaced with a proxy URL.
 - Draft transcript uploads only warm avatars for users referenced by draft messages.
 - Duplicate avatar hashes are uploaded once and counted once in progress.
+- Successfully uploaded avatar hashes are cached in memory by default, up to 50,000 hashes per client.
 - If avatar upload fails, the transcript is unchanged.
 - This is required because the current viewer still expects `user.avatar` to be the original Discord avatar hash.
 
@@ -316,6 +319,7 @@ Behavior notes:
 - `token`: optional bearer token or raw token string
 - `fetch`: optional custom fetch implementation
 - `defaultMediaProxyBaseUrl`: optional override for the auto-created media proxy client used by `uploadDraftTranscript()`
+- `avatarHashCache`: optional in-memory avatar hash cache setting, enabled by default with a 50,000 hash limit
 
 Example:
 
@@ -324,7 +328,8 @@ const uploadClient = new TicketPmUploadClient({
   baseUrl: "https://api.ticket.pm/v2",
   token: process.env.TICKETPM_TOKEN,
   fetch: customFetch,
-  defaultMediaProxyBaseUrl: "https://m.ticket.pm/v2"
+  defaultMediaProxyBaseUrl: "https://m.ticket.pm/v2",
+  avatarHashCache: { limit: 50_000 }
 });
 ```
 
@@ -334,6 +339,7 @@ Important:
 - `uploadDraftTranscript()` auto-creates a `TicketPmMediaProxyClient` when `mediaProxy` is omitted.
 - The auto-created media proxy client inherits the uploader token and fetch implementation.
 - The auto-created media proxy client defaults to `https://m.ticket.pm/v2`, unless `defaultMediaProxyBaseUrl` overrides it.
+- The auto-created media proxy client also inherits `avatarHashCache`, so repeated draft uploads from the same client can skip avatar hashes already uploaded by that client.
 - If you pass an explicit `TicketPmMediaProxyClient`, that client is used as-is instead of the auto-created one.
 - If you pass `mediaProxy: false`, media proxying is disabled for that upload.
 
@@ -350,6 +356,17 @@ const uploadClient = new TicketPmUploadClient({
 await uploadClient.uploadDraftTranscript(draftTranscript);
 ```
 
+Disable the avatar hash cache if you always want avatar hashes to be sent to
+the media proxy:
+
+```ts
+const uploadClient = new TicketPmUploadClient({
+  baseUrl: "https://api.ticket.pm/v2",
+  token,
+  avatarHashCache: false
+});
+```
+
 ## Media proxy client configuration
 
 `TicketPmMediaProxyClient` accepts:
@@ -357,6 +374,7 @@ await uploadClient.uploadDraftTranscript(draftTranscript);
 - `baseUrl`: media API root such as `https://m.ticket.pm/v2`
 - `token`: optional bearer token or raw token string
 - `fetch`: optional custom fetch implementation
+- `avatarHashCache`: optional in-memory avatar hash cache setting, enabled by default with a 50,000 hash limit
 
 ## Important compatibility notes
 
