@@ -107,7 +107,7 @@ function buildUploadHeaders(token?: string): HeadersInit {
  */
 export class TicketPmUploadClient {
 	private readonly fetchImpl: typeof fetch;
-	private autoMediaProxyClient: TicketPmMediaProxyClient | undefined;
+	private defaultMediaProxyClient: TicketPmMediaProxyClient | undefined;
 
 	public constructor(private readonly options: TicketPmUploadClientOptions) {
 		this.fetchImpl = options.fetch ?? fetch;
@@ -164,8 +164,8 @@ export class TicketPmUploadClient {
 	 * This clones the draft transcript, proxies assets when enabled, compacts the
 	 * draft into the stored transcript contract, compresses it, and uploads it.
 	 *
-	 * When `options.mediaProxy` is omitted, the client auto-creates a
-	 * `TicketPmMediaProxyClient` using:
+	 * When `options.mediaProxy` is omitted, the client lazily creates and reuses
+	 * one default `TicketPmMediaProxyClient` using:
 	 *
 	 * - `baseUrl`: `options.defaultMediaProxyBaseUrl ?? https://m.ticket.pm/v2`
 	 * - `token`: the uploader token
@@ -203,13 +203,13 @@ export class TicketPmUploadClient {
 		}
 
 		if (!mediaProxy) {
-			this.autoMediaProxyClient ??= new TicketPmMediaProxyClient({
+			this.defaultMediaProxyClient ??= new TicketPmMediaProxyClient({
 				baseUrl: this.options.defaultMediaProxyBaseUrl ?? DEFAULT_TICKETPM_MEDIA_PROXY_BASE_URL,
 				token: this.options.token,
 				fetch: this.fetchImpl,
 				avatarHashCache: this.options.avatarHashCache
 			});
-			return this.autoMediaProxyClient;
+			return this.defaultMediaProxyClient;
 		}
 
 		return new TicketPmMediaProxyClient({

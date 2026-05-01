@@ -80,12 +80,20 @@ console.log(result.id);
 ```
 
 `uploadDraftTranscript()` auto-creates a `TicketPmMediaProxyClient` when you do
-not pass one explicitly. The default auto-created client uses:
+not pass one explicitly. Each long-lived
+`TicketPmUploadClient` reuses one internal default media proxy client, so avatar
+and media dedupe can carry across repeated draft uploads. The default client
+uses:
 
 - base URL: `https://m.ticket.pm/v2`
 - token: the same token configured on `TicketPmUploadClient`
 - fetch: the same fetch implementation configured on `TicketPmUploadClient`
 - avatar hash cache: the same cache configuration configured on `TicketPmUploadClient`
+
+Create one `TicketPmUploadClient` per bot process or shard and keep it around
+for transcript uploads. Passing a shared `TicketPmMediaProxyClient` manually is
+still supported when you need advanced control over media proxy credentials,
+transport, or cache lifetime.
 
 ## Quick example with a custom media proxy
 
@@ -149,6 +157,13 @@ const result = await uploadClient.uploadDraftTranscript(draftTranscript, {
 });
 console.log(result.id);
 ```
+
+If you want a custom media proxy and want to keep the deduplication cache warm
+across uploads, create one `TicketPmMediaProxyClient` and pass that instance
+each time. Passing an options object such as
+`{ mediaProxy: { baseUrl: "https://media.example.com/v2" } }` creates an
+override client for that upload only, so its avatar cache is not reused on the
+next call.
 
 ## Quick example without any media proxy
 
@@ -336,11 +351,12 @@ const uploadClient = new TicketPmUploadClient({
 Important:
 
 - `uploadCompressedTranscript()` and `uploadTranscript()` do not touch media proxying because they operate on already-built data.
-- `uploadDraftTranscript()` auto-creates a `TicketPmMediaProxyClient` when `mediaProxy` is omitted.
+- `uploadDraftTranscript()` auto-creates and reuses one default `TicketPmMediaProxyClient` when `mediaProxy` is omitted.
 - The auto-created media proxy client inherits the uploader token and fetch implementation.
 - The auto-created media proxy client defaults to `https://m.ticket.pm/v2`, unless `defaultMediaProxyBaseUrl` overrides it.
 - The auto-created media proxy client also inherits `avatarHashCache`, so repeated draft uploads from the same client can skip avatar hashes already uploaded by that client.
 - If you pass an explicit `TicketPmMediaProxyClient`, that client is used as-is instead of the auto-created one.
+- If you pass a `mediaProxy` options object, that upload uses those overrides instead of the cached default client. For repeated custom-proxy uploads that need dedupe, create and pass a shared `TicketPmMediaProxyClient` instance instead.
 - If you pass `mediaProxy: false`, media proxying is disabled for that upload.
 
 Example:

@@ -34,6 +34,86 @@ async function decodeCompressedUploadBody(body: BodyInit | null | undefined) {
 	return JSON.parse(new TextDecoder().decode(decompressed));
 }
 
+function buildAvatarDraftTranscript(options?: { withAttachment?: boolean }): TranscriptBuildInput {
+	return {
+		context: {
+			channel_id: "c1",
+			channels: {
+				c1: { name: "support" }
+			},
+			users: {
+				u1: {
+					id: "u1",
+					username: "alice",
+					avatar: "discordhash"
+				}
+			}
+		},
+		messages: [
+			{
+				id: "m1",
+				timestamp: "2026-03-18T12:00:00.000Z",
+				author: {
+					id: "u1",
+					username: "alice"
+				},
+				content: "hello",
+				...(options?.withAttachment
+					? {
+							attachments: [
+								{
+									id: "a1",
+									filename: "file.png",
+									size: 1,
+									url: "https://cdn.discordapp.com/attachments/1/2/file.png"
+								}
+							]
+						}
+					: {})
+			}
+		]
+	};
+}
+
+function createUploadFetchMock(options?: { avatarHash?: string; attachmentHash?: string; transcriptId?: string }) {
+	const fetchMock = vi.fn(async (input: URL | RequestInfo, _init?: RequestInit | BunFetchRequestInit) => {
+		const url = String(input);
+
+		if (url.endsWith("/avatars/upload")) {
+			return new Response(JSON.stringify({ hash: options?.avatarHash ?? "cached-avatar" }), {
+				status: 200,
+				headers: {
+					"Content-Type": "application/json"
+				}
+			});
+		}
+
+		if (url.endsWith("/attachments/upload")) {
+			return new Response(JSON.stringify({ hash: options?.attachmentHash ?? "attachment-hash" }), {
+				status: 200,
+				headers: {
+					"Content-Type": "application/json"
+				}
+			});
+		}
+
+		return new Response(JSON.stringify({ id: options?.transcriptId ?? "transcript-id" }), {
+			status: 200,
+			headers: {
+				"Content-Type": "application/json"
+			}
+		});
+	});
+
+	return Object.assign(fetchMock, {
+		preconnect: vi.fn()
+	});
+}
+
+function countFetchCalls(fetchMock: ReturnType<typeof createUploadFetchMock>, url: string): number {
+	return fetchMock.mock.calls.filter(([input]) => String(input) === url).length;
+}
+
 afterEach(() => {
 	vi.unstubAllGlobals();
 });
@@ -1203,252 +1283,142 @@ describe("@ticketpm/core", () => {
 		expect(draftTranscript.messages[0]?.attachments?.[0]?.proxy_url).toBeUndefined();
 	});
 
-	it("reuses the auto-created media proxy avatar hash cache across draft uploads", async () => {
-		const fetchCalls: string[] = [];
-		const draftTranscript: TranscriptBuildInput = {
-			context: {
-				channel_id: "c1",
-				channels: {
-					c1: { name: "support" }
-				},
-				users: {
-					u1: {
-						id: "u1",
-						username: "alice",
-						avatar: "discordhash"
-					}
-				}
-			},
-			messages: [
-				{
-					id: "m1",
-					timestamp: "2026-03-18T12:00:00.000Z",
-					author: {
-						id: "u1",
-						username: "alice"
-					},
-					content: "hello"
-				}
-			]
-		};
+	it("reuses avatar cache between draft uploads", async () => {
+		const fetchImpl = createUploadFetchMock();
 		const uploadClient = new TicketPmUploadClient({
 			baseUrl: "https://api.ticket.pm/v2",
 			token: "secret-token",
-			fetch: (async (input: URL | RequestInfo) => {
-				fetchCalls.push(String(input));
-
-				if (String(input) === "https://m.ticket.pm/v2/avatars/upload") {
-					return new Response(JSON.stringify({ hash: "cached-avatar" }), {
-						status: 200,
-						headers: {
-							"Content-Type": "application/json"
-						}
-					});
-				}
-
-				return new Response(JSON.stringify({ id: "transcript-id" }), {
-					status: 200,
-					headers: {
-						"Content-Type": "application/json"
-					}
-				});
-			}) as typeof fetch
+			fetch: fetchImpl
 		});
+		const draftTranscript = buildAvatarDraftTranscript();
 
 		await uploadClient.uploadDraftTranscript(draftTranscript);
 		await uploadClient.uploadDraftTranscript(draftTranscript);
 
-		expect(fetchCalls.filter((url) => url === "https://m.ticket.pm/v2/avatars/upload")).toHaveLength(1);
-		expect(fetchCalls.filter((url) => url === "https://api.ticket.pm/v2/upload?uuid=uuid")).toHaveLength(2);
+		expect(fetchImpl).toHaveBeenCalledTimes(3);
+		expect(countFetchCalls(fetchImpl, "https://m.ticket.pm/v2/avatars/upload")).toBe(1);
+		expect(countFetchCalls(fetchImpl, "https://api.ticket.pm/v2/upload?uuid=uuid")).toBe(2);
+	});
+
+	it("does not share default cache across upload clients", async () => {
+		const fetchImpl = createUploadFetchMock();
+		const firstUploadClient = new TicketPmUploadClient({
+			baseUrl: "https://api.ticket.pm/v2",
+			fetch: fetchImpl
+		});
+		const secondUploadClient = new TicketPmUploadClient({
+			baseUrl: "https://api.ticket.pm/v2",
+			fetch: fetchImpl
+		});
+		const draftTranscript = buildAvatarDraftTranscript();
+
+		await firstUploadClient.uploadDraftTranscript(draftTranscript);
+		await firstUploadClient.uploadDraftTranscript(draftTranscript);
+		await secondUploadClient.uploadDraftTranscript(draftTranscript);
+
+		expect(fetchImpl).toHaveBeenCalledTimes(5);
+		expect(countFetchCalls(fetchImpl, "https://m.ticket.pm/v2/avatars/upload")).toBe(2);
+		expect(countFetchCalls(fetchImpl, "https://api.ticket.pm/v2/upload?uuid=uuid")).toBe(3);
 	});
 
 	it("forwards disabled avatar hash cache settings to the auto-created media proxy client", async () => {
-		const fetchCalls: string[] = [];
-		const draftTranscript: TranscriptBuildInput = {
-			context: {
-				channel_id: "c1",
-				channels: {
-					c1: { name: "support" }
-				},
-				users: {
-					u1: {
-						id: "u1",
-						username: "alice",
-						avatar: "discordhash"
-					}
-				}
-			},
-			messages: [
-				{
-					id: "m1",
-					timestamp: "2026-03-18T12:00:00.000Z",
-					author: {
-						id: "u1",
-						username: "alice"
-					},
-					content: "hello"
-				}
-			]
-		};
+		const fetchImpl = createUploadFetchMock();
 		const uploadClient = new TicketPmUploadClient({
 			baseUrl: "https://api.ticket.pm/v2",
 			avatarHashCache: false,
-			fetch: (async (input: URL | RequestInfo) => {
-				fetchCalls.push(String(input));
-
-				if (String(input) === "https://m.ticket.pm/v2/avatars/upload") {
-					return new Response(JSON.stringify({ hash: "cached-avatar" }), {
-						status: 200,
-						headers: {
-							"Content-Type": "application/json"
-						}
-					});
-				}
-
-				return new Response(JSON.stringify({ id: "transcript-id" }), {
-					status: 200,
-					headers: {
-						"Content-Type": "application/json"
-					}
-				});
-			}) as typeof fetch
+			fetch: fetchImpl
 		});
+		const draftTranscript = buildAvatarDraftTranscript();
 
 		await uploadClient.uploadDraftTranscript(draftTranscript);
 		await uploadClient.uploadDraftTranscript(draftTranscript);
 
-		expect(fetchCalls.filter((url) => url === "https://m.ticket.pm/v2/avatars/upload")).toHaveLength(2);
-		expect(fetchCalls.filter((url) => url === "https://api.ticket.pm/v2/upload?uuid=uuid")).toHaveLength(2);
+		expect(fetchImpl).toHaveBeenCalledTimes(4);
+		expect(countFetchCalls(fetchImpl, "https://m.ticket.pm/v2/avatars/upload")).toBe(2);
+		expect(countFetchCalls(fetchImpl, "https://api.ticket.pm/v2/upload?uuid=uuid")).toBe(2);
 	});
 
-	it("allows draft uploads to disable media proxy auto-creation", async () => {
-		const fetchCalls: Array<{ url: string; body?: BodyInit | null }> = [];
-		const draftTranscript: TranscriptBuildInput = {
-			context: {
-				channel_id: "c1",
-				channels: {
-					c1: { name: "support" }
-				}
-			},
-			messages: [
-				{
-					id: "m1",
-					timestamp: "2026-03-18T12:00:00.000Z",
-					content: "hello",
-					attachments: [
-						{
-							id: "a1",
-							filename: "file.png",
-							size: 1,
-							url: "https://cdn.discordapp.com/attachments/1/2/file.png"
-						}
-					]
-				}
-			]
-		};
+	it("skips proxy calls when media proxying is disabled", async () => {
+		const fetchImpl = createUploadFetchMock();
 		const uploadClient = new TicketPmUploadClient({
 			baseUrl: "https://api.ticket.pm/v2",
 			token: "secret-token",
-			fetch: (async (input: URL | RequestInfo, init?: RequestInit | BunFetchRequestInit) => {
-				fetchCalls.push({
-					url: String(input),
-					body: init?.body
-				});
-
-				return new Response(JSON.stringify({ id: "transcript-id" }), {
-					status: 200,
-					headers: {
-						"Content-Type": "application/json"
-					}
-				});
-			}) as typeof fetch
+			fetch: fetchImpl
 		});
+		const draftTranscript = buildAvatarDraftTranscript({ withAttachment: true });
 
 		await uploadClient.uploadDraftTranscript(draftTranscript, {
 			mediaProxy: false
 		});
 
-		const uploadRequest = fetchCalls.find((call) => call.url === "https://api.ticket.pm/v2/upload?uuid=uuid");
-		const uploadedTranscript = await decodeCompressedUploadBody(uploadRequest?.body);
+		const uploadRequest = fetchImpl.mock.calls.find(([input]) => String(input) === "https://api.ticket.pm/v2/upload?uuid=uuid");
+		const uploadedTranscript = await decodeCompressedUploadBody(uploadRequest?.[1]?.body);
 
-		expect(fetchCalls).toHaveLength(1);
+		expect(fetchImpl).toHaveBeenCalledTimes(1);
+		expect(fetchImpl.mock.calls.some(([input]) => String(input).includes("/avatars/upload"))).toBe(false);
+		expect(fetchImpl.mock.calls.some(([input]) => String(input).includes("/attachments/upload"))).toBe(false);
+		expect(uploadedTranscript.context.users.u1.avatar).toBe("discordhash");
 		expect(uploadedTranscript.messages[0].attachments[0].proxy_url).toBeUndefined();
 		expect(uploadedTranscript.messages[0].attachments[0].url).toBe("https://cdn.discordapp.com/attachments/1/2/file.png");
 	});
 
-	it("uses an explicitly provided media proxy client for draft uploads", async () => {
-		const fetchCalls: Array<{ url: string; headers?: HeadersInit; body?: BodyInit | null }> = [];
-		const draftTranscript: TranscriptBuildInput = {
-			context: {
-				channel_id: "c1",
-				channels: {
-					c1: { name: "support" }
-				}
-			},
-			messages: [
-				{
-					id: "m1",
-					timestamp: "2026-03-18T12:00:00.000Z",
-					content: "hello",
-					attachments: [
-						{
-							id: "a1",
-							filename: "file.png",
-							size: 1,
-							url: "https://cdn.discordapp.com/attachments/1/2/file.png"
-						}
-					]
-				}
-			]
-		};
+	it("uses an explicit media proxy client", async () => {
+		const mediaFetch = createUploadFetchMock({ attachmentHash: "custom-hash" });
 		const mediaProxy = new TicketPmMediaProxyClient({
 			baseUrl: "https://media.example.com/v2",
 			token: "proxy-token",
-			fetch: (async (input: URL | RequestInfo, init?: RequestInit | BunFetchRequestInit) => {
-				fetchCalls.push({
-					url: String(input),
-					headers: init?.headers,
-					body: init?.body
-				});
-
-				return new Response(JSON.stringify({ hash: "custom-hash" }), {
-					status: 200,
-					headers: {
-						"Content-Type": "application/json"
-					}
-				});
-			}) as typeof fetch
+			fetch: mediaFetch
 		});
+		const uploadFetch = createUploadFetchMock();
 		const uploadClient = new TicketPmUploadClient({
 			baseUrl: "https://api.ticket.pm/v2",
 			token: "uploader-token",
-			fetch: (async (input: URL | RequestInfo, init?: RequestInit | BunFetchRequestInit) => {
-				fetchCalls.push({
-					url: String(input),
-					headers: init?.headers,
-					body: init?.body
-				});
-
-				return new Response(JSON.stringify({ id: "transcript-id" }), {
-					status: 200,
-					headers: {
-						"Content-Type": "application/json"
-					}
-				});
-			}) as typeof fetch
+			fetch: uploadFetch
 		});
+		const draftTranscript = buildAvatarDraftTranscript({ withAttachment: true });
 
 		await uploadClient.uploadDraftTranscript(draftTranscript, {
 			mediaProxy
 		});
 
-		const proxyRequest = fetchCalls.find((call) => call.url === "https://media.example.com/v2/attachments/upload");
-		const uploadRequest = fetchCalls.find((call) => call.url === "https://api.ticket.pm/v2/upload?uuid=uuid");
-		const uploadedTranscript = await decodeCompressedUploadBody(uploadRequest?.body);
+		const proxyRequest = mediaFetch.mock.calls.find(
+			([input]) => String(input) === "https://media.example.com/v2/attachments/upload"
+		);
+		const avatarRequest = mediaFetch.mock.calls.find(
+			([input]) => String(input) === "https://media.example.com/v2/avatars/upload"
+		);
+		const uploadRequest = uploadFetch.mock.calls.find(([input]) => String(input) === "https://api.ticket.pm/v2/upload?uuid=uuid");
+		const uploadedTranscript = await decodeCompressedUploadBody(uploadRequest?.[1]?.body);
 
+		expect(mediaFetch).toHaveBeenCalledTimes(2);
+		expect(uploadFetch).toHaveBeenCalledTimes(1);
 		expect(proxyRequest).toBeDefined();
-		expect(new Headers(proxyRequest?.headers).get("Authorization")).toBe("Bearer proxy-token");
+		expect(new Headers(proxyRequest?.[1]?.headers).get("Authorization")).toBe("Bearer proxy-token");
+		expect(avatarRequest).toBeDefined();
+		expect(new Headers(avatarRequest?.[1]?.headers).get("Authorization")).toBe("Bearer proxy-token");
+		expect(uploadedTranscript.context.users.u1.avatar).toBe("discordhash");
 		expect(uploadedTranscript.messages[0].attachments[0].proxy_url).toBe("https://media.example.com/v2/attachments/custom-hash");
+	});
+
+	it("bypasses the default cache when media proxy options are passed", async () => {
+		const fetchImpl = createUploadFetchMock();
+		const uploadClient = new TicketPmUploadClient({
+			baseUrl: "https://api.ticket.pm/v2",
+			fetch: fetchImpl
+		});
+		const draftTranscript = buildAvatarDraftTranscript();
+
+		await uploadClient.uploadDraftTranscript(draftTranscript);
+		await uploadClient.uploadDraftTranscript(draftTranscript, {
+			mediaProxy: {
+				baseUrl: "https://media.example.com/v2"
+			}
+		});
+
+		expect(fetchImpl).toHaveBeenCalledTimes(4);
+		expect(countFetchCalls(fetchImpl, "https://m.ticket.pm/v2/avatars/upload")).toBe(1);
+		expect(countFetchCalls(fetchImpl, "https://media.example.com/v2/avatars/upload")).toBe(1);
+		expect(countFetchCalls(fetchImpl, "https://api.ticket.pm/v2/upload?uuid=uuid")).toBe(2);
 	});
 
 	it("falls back to JSON cloning when structuredClone is unavailable", async () => {
